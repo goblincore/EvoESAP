@@ -27,7 +27,7 @@ from transformers.modeling_outputs import MoeModelOutputWithPast
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
 from transformers.processing_utils import Unpack
 from transformers.utils import TransformersKwargs, auto_docstring, is_grouped_mm_available, logging
-from transformers.utils.generic import OutputRecorder
+from transformers.utils.output_capturing import OutputRecorder
 from transformers.models.gemma.modeling_gemma import GemmaMLP
 from transformers.models.llama.modeling_llama import (
     LlamaAttention,

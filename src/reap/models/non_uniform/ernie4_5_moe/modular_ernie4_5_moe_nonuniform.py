@@ -26,7 +26,8 @@ from transformers.modeling_outputs import MoeModelOutputWithPast
 from transformers.modeling_utils import PreTrainedModel
 from transformers.processing_utils import Unpack
 from transformers.utils import TransformersKwargs, auto_docstring, can_return_tuple, logging
-from transformers.utils.generic import OutputRecorder, check_model_inputs, maybe_autocast
+from transformers.utils.generic import check_model_inputs, maybe_autocast
+from transformers.utils.output_capturing import OutputRecorder
 from transformers.models.ernie4_5.modeling_ernie4_5 import (
     Ernie4_5RotaryEmbedding,
     apply_rotary_pos_emb,

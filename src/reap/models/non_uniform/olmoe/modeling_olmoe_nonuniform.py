@@ -40,7 +40,8 @@ from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_u
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
 from transformers.processing_utils import Unpack
 from transformers.utils import TransformersKwargs, auto_docstring, can_return_tuple, is_grouped_mm_available
-from transformers.utils.generic import OutputRecorder, check_model_inputs, maybe_autocast
+from transformers.utils.generic import check_model_inputs, maybe_autocast
+from transformers.utils.output_capturing import OutputRecorder
 
 from .configuration_olmoe_nonuniform import OlmoeConfig, NonUniformOlmoeConfig
 
