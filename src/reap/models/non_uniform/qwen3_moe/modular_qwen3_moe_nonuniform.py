@@ -26,7 +26,7 @@ from transformers.integrations import use_experts_implementation
 from transformers.modeling_outputs import MoeCausalLMOutputWithPast, MoeModelOutputWithPast
 from transformers.processing_utils import Unpack
 from transformers.utils import TransformersKwargs, logging
-from transformers.utils.generic import OutputRecorder
+from transformers.utils.output_capturing import OutputRecorder
 from transformers.models.llama.modeling_llama import (
     LlamaForQuestionAnswering,
     LlamaForSequenceClassification,
