@@ -124,10 +124,11 @@ class Qwen3_5MoeNonUniformExperts(nn.Module):
 class Qwen3_5MoeNonUniformTopKRouter(nn.Module):
     """Top-k router with per-layer-variable num_experts.
 
-    Mirrors upstream Qwen3_5MoeTopKRouter. NOTE: Qwen3_5MoeTextConfig does NOT
-    have a `norm_topk_prob` attribute (unlike Qwen3MoeConfig). Qwen3.5/3.6
-    routers skip the post-topk renormalization step that Qwen3 routers have.
-    We mirror that exactly — no `norm_topk_prob` field, no renormalization.
+    Mirrors upstream Qwen3_5MoeTopKRouter exactly:
+      - No `norm_topk_prob` config attribute (unlike Qwen3MoeConfig).
+      - Top-k probabilities ARE renormalized (unconditionally, not gated).
+      - Variable naming follows upstream: `router_probs` after softmax (we use
+        the same name internally; same numerics).
     """
 
     def __init__(self, config, num_experts: Optional[int] = None):
@@ -143,10 +144,12 @@ class Qwen3_5MoeNonUniformTopKRouter(nn.Module):
     def forward(self, hidden_states: torch.Tensor):
         hidden_states = hidden_states.reshape(-1, self.hidden_dim)
         router_logits = F.linear(hidden_states, self.weight)  # (seq_len, num_experts)
-        router_logits = F.softmax(router_logits, dtype=torch.float, dim=-1)
+        router_probs = F.softmax(router_logits, dtype=torch.float, dim=-1)
         router_top_value, router_indices = torch.topk(
-            router_logits, self.top_k, dim=-1
+            router_probs, self.top_k, dim=-1
         )
+        # Always renormalize top-k probs (matches upstream Qwen3.5/3.6 router).
+        router_top_value /= router_top_value.sum(dim=-1, keepdim=True)
         router_top_value = router_top_value.to(router_logits.dtype)
         router_scores = router_top_value
         return router_logits, router_scores, router_indices
