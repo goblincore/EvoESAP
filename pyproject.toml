@@ -10,38 +10,30 @@ requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.7.0",
     "datasets>=3.6.0, <4.0.0",
-    "evalplus[vllm]>=0.3.1",
     "jupyter>=1.1.1",
-    "lm-eval[vllm,api]>=0.4.9.1",
     "matplotlib>=3.10.3",
     "python-dotenv>=1.1.0",
     "seaborn>=0.13.2",
-    "torch==2.7.1",
-    "transformers==5.0.0dev",
+    "torch==2.9.1",
+    "transformers",
     "umap-learn>=0.5.7",
     # "vllm==0.10.0",
-    "vllm==0.13.0",
+    "vllm",
     # "vllm",
-    "livecodebench",
     "deepspeed>=0.17.4",
     "trl>=0.21.0",
     "hatchling>=1.27.0",
     # "flash-attn>=2.7.1,<=2.8.0", # required for xformers for Llama4. Might need to manually install with --no-build-isolation
     "flash-attn>=2.8.3",
     "wandb>=0.21.1",
-    "crfm-helm",
-    "evalscope",
 ]
 
 [tool.uv]
 no-build-isolation-package = ["flash-attn"]
 
 [tool.uv.sources]
-evalplus = { path = "third-party/evalplus", editable = true }
-livecodebench = { path="third-party/LiveCodeBench", editable = true}
-crfm-helm = { path="third-party/helm", editable = true }
-evalscope = { path = "third-party/evalscope", editable=true}
-# vllm = { path = "third-party/vllm", editable=true}
+transformers = { git = "https://github.com/huggingface/transformers.git" }
+vllm = { git = "https://github.com/goblincore/vllm.git", branch = "goblincore-fixes" }
 
 [project.entry-points."vllm.general_plugins"]
 llama_4_text_only = "reap.model_util:register_llama_with_vllm"
