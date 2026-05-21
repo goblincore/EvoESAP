@@ -162,6 +162,32 @@ MODEL_ATTRS = {
         "num_experts": "num_experts",
         "num_experts_per_tok": "num_experts_per_tok",
     },
+    # Qwen3.5/3.6 MoE — packed gate_up_proj + down_proj experts (same layout
+    # as Qwen3MoeForCausalLM), but with an always-on gated shared_expert
+    # alongside the routed experts. fused=True because gate_proj and up_proj
+    # are merged into a single packed tensor gate_up_proj.
+    "Qwen3_5MoeForCausalLM": {
+        "moe_block": "mlp",
+        "gate_proj": "gate_up_proj",
+        "up_proj": "gate_up_proj",
+        "down_proj": "down_proj",
+        "experts": "experts",
+        "fused": True,
+        "router": "gate",
+        "num_experts": "num_experts",
+        "num_experts_per_tok": "num_experts_per_tok",
+    },
+    "NonUniformQwen3_5MoeForCausalLM": {
+        "moe_block": "mlp",
+        "gate_proj": "gate_up_proj",
+        "up_proj": "gate_up_proj",
+        "down_proj": "down_proj",
+        "experts": "experts",
+        "fused": True,
+        "router": "gate",
+        "num_experts": "num_experts",
+        "num_experts_per_tok": "num_experts_per_tok",
+    },
 }
 
 def _tensor_ndim(value: Any) -> int | None:

@@ -656,7 +656,15 @@ def _install_temp_router_masks(
         if not valid:
             return False
         # OLMoE TopKRouter (HF-style) uses a weight Parameter and calls F.linear + softmax.
-        if router.__class__.__name__ not in {"OlmoeTopKRouter", "Qwen3MoeTopKRouter"}:
+        # Qwen3.5/3.6's Qwen3_5MoeTopKRouter has the same structure (weight Parameter +
+        # F.linear + softmax), and our non-uniform variant Qwen3_5MoeNonUniformTopKRouter
+        # mirrors it exactly, so the same mask-installation logic applies.
+        if router.__class__.__name__ not in {
+            "OlmoeTopKRouter",
+            "Qwen3MoeTopKRouter",
+            "Qwen3_5MoeTopKRouter",
+            "Qwen3_5MoeNonUniformTopKRouter",
+        }:
             return False
         if not hasattr(router, "weight") or not hasattr(router, "top_k"):
             return False

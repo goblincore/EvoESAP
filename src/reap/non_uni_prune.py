@@ -37,6 +37,14 @@ from reap.models.non_uniform.qwen3_moe.modeling_qwen3_moe_nonuniform import (
     NonUniformQwen3MoeForCausalLM,
     Qwen3MoeSparseMoeBlock,
 )
+from reap.models.non_uniform.qwen3_5_moe.configuration_qwen3_5_moe_nonuniform import (
+    NonUniformQwen3_5MoeConfig,
+    NonUniformQwen3_5MoeTextConfig,
+)
+from reap.models.non_uniform.qwen3_5_moe.modeling_qwen3_5_moe_nonuniform import (
+    NonUniformQwen3_5MoeForCausalLM,
+    Qwen3_5MoeNonUniformSparseMoeBlock,
+)
 from reap.args import (
     ClusterArgs,
     DatasetArgs,
@@ -580,6 +588,19 @@ def _copy_nonuniform_qwen3_model_code(target_dir: pathlib.Path):
         dst = target_dir / fname
         dst.write_text(src.read_text())
 
+
+def _copy_nonuniform_qwen3_5_model_code(target_dir: pathlib.Path):
+    """Copy the custom non-uniform Qwen3.5/3.6 MoE modeling files into the saved model directory."""
+    src_dir = pathlib.Path(__file__).resolve().parent / "models" / "non_uniform" / "qwen3_5_moe"
+    for fname in [
+        "__init__.py",
+        "configuration_qwen3_5_moe_nonuniform.py",
+        "modeling_qwen3_5_moe_nonuniform.py",
+    ]:
+        src = src_dir / fname
+        dst = target_dir / fname
+        dst.write_text(src.read_text())
+
 def _build_nonuniform_config(base_config, per_layer_counts: list[int]) -> NonUniformOlmoeConfig:
     cfg_dict = base_config.to_dict()
     cfg_dict["num_experts_per_layer"] = per_layer_counts
@@ -617,6 +638,39 @@ def _build_nonuniform_qwen3_config(base_config, per_layer_counts: list[int]) -> 
     }
     cfg.architectures = ["NonUniformQwen3MoeForCausalLM"]
     return cfg
+
+
+def _build_nonuniform_qwen3_5_config(
+    base_config, per_layer_counts: list[int]
+) -> NonUniformQwen3_5MoeTextConfig:
+    """Build a NonUniformQwen3_5MoeTextConfig from a Qwen3_5MoeTextConfig base
+    plus a per-layer expert count plan.
+
+    Note: takes the TEXT config (not the top-level VLM config). We route EvoESAP
+    through Qwen3.6 as a text-only model (NonUniformQwen3_5MoeForCausalLM) — the
+    vision tower is reattached to the saved checkpoint as a separate post-process
+    step (see scripts/post_process_qwen3_6_vlm.py).
+    """
+    cfg_dict = base_config.to_dict()
+    cfg_dict["num_experts_per_layer"] = per_layer_counts
+    cfg = NonUniformQwen3_5MoeTextConfig(**cfg_dict)
+    cfg.auto_map = {
+        "AutoConfig": "configuration_qwen3_5_moe_nonuniform.NonUniformQwen3_5MoeTextConfig",
+        "AutoModelForCausalLM": "modeling_qwen3_5_moe_nonuniform.NonUniformQwen3_5MoeForCausalLM",
+        "AutoModel": "modeling_qwen3_5_moe_nonuniform.NonUniformQwen3_5MoeTextModel",
+    }
+    cfg.architectures = ["NonUniformQwen3_5MoeForCausalLM"]
+    return cfg
+
+
+def _is_qwen3_5_moe_layer(config, layer_idx: int) -> bool:
+    """Whether the given decoder layer is a MoE layer in Qwen3.5/3.6.
+
+    Qwen3.6 has decoder_sparse_step=None (no dense-MLP interleaving) and every
+    layer is MoE. We provide this for parity with the qwen3_moe path which has
+    sparse_step-aware dispatch.
+    """
+    return True
 
 
 def _structural_prune_olmoe(
@@ -806,6 +860,66 @@ def _structural_prune_qwen3_moe(
 
         # keep config in sync for saved checkpoints
         model.config.num_experts_per_layer[layer_idx] = kept
+
+
+def _structural_prune_qwen3_5_moe(
+    model: NonUniformQwen3_5MoeForCausalLM,
+    pruned_experts_info: dict[str, list[int]],
+    per_layer_counts: list[int],
+):
+    """Physically drop routed experts per layer for Qwen3.5/3.6 MoE.
+
+    Mirrors _structural_prune_qwen3_moe. Key differences:
+      - Layer's .mlp is Qwen3_5MoeNonUniformSparseMoeBlock (has shared_expert
+        and shared_expert_gate alongside routed experts and gate).
+      - We touch ONLY the routed experts + gate; shared_expert and
+        shared_expert_gate are dense always-on modules and pass through
+        unchanged.
+    """
+    for layer_idx, retained in enumerate(per_layer_counts):
+        if not _is_qwen3_5_moe_layer(model.config, layer_idx):
+            continue
+        pruned = pruned_experts_info.get(str(layer_idx), [])
+        if not pruned:
+            continue
+        moe = model.model.layers[layer_idx].mlp
+        if not isinstance(moe, Qwen3_5MoeNonUniformSparseMoeBlock):
+            continue
+        num_experts = int(getattr(moe, "num_experts", moe.gate.weight.shape[0]))
+        retain_indices = sorted(i for i in range(num_experts) if i not in pruned)
+        kept = len(retain_indices)
+        if kept <= 0:
+            raise ValueError(
+                f"Layer {layer_idx}: cannot prune all routed experts (num_experts={num_experts})."
+            )
+
+        with torch.no_grad():
+            # Router weights: (num_experts, hidden_size)
+            moe.gate.weight = torch.nn.Parameter(
+                moe.gate.weight.data[retain_indices].clone()
+            )
+            # Packed routed experts
+            moe.experts.gate_up_proj = torch.nn.Parameter(
+                moe.experts.gate_up_proj.data[retain_indices].clone()
+            )
+            moe.experts.down_proj = torch.nn.Parameter(
+                moe.experts.down_proj.data[retain_indices].clone()
+            )
+            # shared_expert and shared_expert_gate untouched.
+
+        if hasattr(moe, "num_experts"):
+            moe.num_experts = kept
+        if hasattr(moe.gate, "num_experts"):
+            moe.gate.num_experts = kept
+        if hasattr(moe.gate, "top_k"):
+            moe.gate.top_k = min(int(moe.gate.top_k), kept)
+        if hasattr(moe.experts, "num_experts"):
+            moe.experts.num_experts = kept
+
+        # Keep config in sync for saved checkpoints.
+        if model.config.num_experts_per_layer is not None:
+            model.config.num_experts_per_layer[layer_idx] = kept
+
 
 def main():
     parser = HfArgumentParser(
@@ -1379,6 +1493,66 @@ def main():
                 nu_model.config.num_experts = int(max(moe_retained))
             model = nu_model
             model.config = nu_model.config
+        elif model_type == "qwen3_5_moe":
+            logger.info("Applying structural non-uniform pruning for Qwen3.5/3.6 MoE.")
+            # Qwen3.5/3.6 is a VLM whose MoE config lives on text_config.
+            text_config = model.config.text_config
+            num_layers = int(text_config.num_hidden_layers)
+            base_num_experts = int(text_config.num_experts)
+            retained_per_layer = [base_num_experts] * num_layers
+
+            for layer_idx in range(num_layers):
+                if not _is_qwen3_5_moe_layer(model.config, layer_idx):
+                    continue
+                pruned = pruned_experts_info_str.get(str(layer_idx), [])
+                retained_per_layer[layer_idx] = base_num_experts - len(pruned)
+
+            moe_retained_preview = [
+                kept for idx, kept in enumerate(retained_per_layer)
+                if _is_qwen3_5_moe_layer(model.config, idx)
+            ]
+            if moe_retained_preview:
+                logger.info(
+                    "Structural Qwen3.5/3.6 retained MoE experts: min=%d max=%d (moe_layers=%d)",
+                    min(moe_retained_preview),
+                    max(moe_retained_preview),
+                    len(moe_retained_preview),
+                )
+
+            orig_top_k = int(text_config.num_experts_per_tok)
+            too_small = [
+                (idx, kept) for idx, kept in enumerate(retained_per_layer)
+                if _is_qwen3_5_moe_layer(model.config, idx) and kept < orig_top_k
+            ]
+            if too_small:
+                logger.warning(
+                    "Some MoE layers retain fewer experts (%s) than original top_k=%s; consider lowering top_k or adjusting the plan.",
+                    too_small,
+                    orig_top_k,
+                )
+
+            # Build the text-only non-uniform model. EvoESAP routes Qwen3.6 as
+            # text-only — vision tower is reattached as a separate post-process.
+            nu_text_config = _build_nonuniform_qwen3_5_config(
+                text_config, [base_num_experts] * num_layers
+            )
+            nu_model = NonUniformQwen3_5MoeForCausalLM(nu_text_config)
+            nu_model.load_state_dict(model.state_dict(), strict=False)
+            _structural_prune_qwen3_5_moe(
+                nu_model, pruned_experts_info_str, retained_per_layer
+            )
+            nu_model.config.num_experts_per_layer = retained_per_layer
+            moe_retained = [
+                kept for idx, kept in enumerate(retained_per_layer)
+                if _is_qwen3_5_moe_layer(model.config, idx)
+            ]
+            if moe_retained:
+                nu_model.config.num_experts_per_tok = min(
+                    int(nu_model.config.num_experts_per_tok), int(min(moe_retained))
+                )
+                nu_model.config.num_experts = int(max(moe_retained))
+            model = nu_model
+            model.config = nu_model.config
         else:
             raise ValueError(f"Structural non-uniform pruning not supported for model_type={model_type!r}")
     else:
@@ -1404,6 +1578,8 @@ def main():
             _copy_nonuniform_ernie_model_code(pruned_model_dir)
         elif getattr(model.config, "model_type", "") == "qwen3_moe":
             _copy_nonuniform_qwen3_model_code(pruned_model_dir)
+        elif getattr(model.config, "model_type", "") in {"qwen3_5_moe", "qwen3_5_moe_text"}:
+            _copy_nonuniform_qwen3_5_model_code(pruned_model_dir)
     model.save_pretrained(pruned_model_dir)
     tokenizer.save_pretrained(pruned_model_dir)
     with open(pruned_model_dir / "pruned_experts.json", "w") as f:
