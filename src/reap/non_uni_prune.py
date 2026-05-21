@@ -56,7 +56,10 @@ from reap.args import (
     SearchArgs,
 )
 from reap.data import DATASET_REGISTRY
-from reap.eval import run_evaluate
+# run_evaluate is imported lazily inside main() — see comment near the call
+# site. The eval suite (lm_eval, evalplus, livecodebench) is an optional dep
+# in this fork (stripped to avoid the transformers<5 cap chain); deferring the
+# import keeps module load working when do_eval=False.
 from reap.main import (
     apply_layerwise_pruning,
     record_activations,
@@ -1629,6 +1632,16 @@ def main():
     )
 
     if reap_args.do_eval:
+        # Lazy import — reap.eval depends on lm_eval (eval-suite dep, optional
+        # in this fork). Only import when do_eval is actually requested.
+        try:
+            from reap.eval import run_evaluate
+        except ImportError as e:
+            raise RuntimeError(
+                "do_eval=True but the eval-suite extras (lm_eval, evalplus, "
+                "livecodebench, etc.) are not installed. Either pip install "
+                "them, or rerun with do_eval=False / run_final_eval=false."
+            ) from e
         remove_hook_from_module(model, recurse=True)
         model.to("cpu")
         del model
