@@ -122,7 +122,13 @@ class Qwen3_5MoeNonUniformExperts(nn.Module):
 
 
 class Qwen3_5MoeNonUniformTopKRouter(nn.Module):
-    """Top-k router with per-layer-variable num_experts."""
+    """Top-k router with per-layer-variable num_experts.
+
+    Mirrors upstream Qwen3_5MoeTopKRouter. NOTE: Qwen3_5MoeTextConfig does NOT
+    have a `norm_topk_prob` attribute (unlike Qwen3MoeConfig). Qwen3.5/3.6
+    routers skip the post-topk renormalization step that Qwen3 routers have.
+    We mirror that exactly — no `norm_topk_prob` field, no renormalization.
+    """
 
     def __init__(self, config, num_experts: Optional[int] = None):
         super().__init__()
@@ -131,7 +137,6 @@ class Qwen3_5MoeNonUniformTopKRouter(nn.Module):
         )
         # Clamp top_k in case num_experts < config.num_experts_per_tok.
         self.top_k = min(int(config.num_experts_per_tok), int(self.num_experts))
-        self.norm_topk_prob = config.norm_topk_prob
         self.hidden_dim = config.hidden_size
         self.weight = nn.Parameter(torch.zeros(self.num_experts, self.hidden_dim))
 
@@ -142,8 +147,6 @@ class Qwen3_5MoeNonUniformTopKRouter(nn.Module):
         router_top_value, router_indices = torch.topk(
             router_logits, self.top_k, dim=-1
         )
-        if self.norm_topk_prob:
-            router_top_value /= router_top_value.sum(dim=-1, keepdim=True)
         router_top_value = router_top_value.to(router_logits.dtype)
         router_scores = router_top_value
         return router_logits, router_scores, router_indices
