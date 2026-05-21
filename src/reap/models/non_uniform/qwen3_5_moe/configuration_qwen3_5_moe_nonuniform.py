@@ -44,6 +44,11 @@ class NonUniformQwen3_5MoeTextConfig(Qwen3_5MoeTextConfig):
         # Set the field BEFORE super().__init__ so subclasses that read it during
         # init (e.g. layer_types-aware validators) see it.
         self.num_experts_per_layer = num_experts_per_layer
+        # Variable per-layer expert counts preclude transformers' grouped_mm
+        # kernel (which assumes uniform shape). Default to "eager" unless the
+        # caller explicitly overrides. Without this, PreTrainedModel.__init__
+        # tries to dispatch grouped_mm and raises on our subclass.
+        kwargs.setdefault("experts_implementation", "eager")
         super().__init__(*args, **kwargs)
 
     def get_num_experts(self, layer_idx: int) -> int:

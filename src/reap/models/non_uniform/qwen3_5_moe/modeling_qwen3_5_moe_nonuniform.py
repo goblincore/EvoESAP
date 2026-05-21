@@ -28,6 +28,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.activations import ACT2FN
+from transformers.integrations import use_experts_implementation
 from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import (
     Qwen3_5MoeAttention,
     Qwen3_5MoeForCausalLM,
@@ -56,8 +57,18 @@ from .configuration_qwen3_5_moe_nonuniform import (
 # ---------------------------------------------------------------------------
 
 
+@use_experts_implementation
 class Qwen3_5MoeNonUniformExperts(nn.Module):
-    """Packed routed experts with per-layer-variable num_experts."""
+    """Packed routed experts with per-layer-variable num_experts.
+
+    The @use_experts_implementation decorator is required so that the parent
+    PreTrainedModel's _can_set_experts_implementation() check passes for our
+    subclass (transformers/modeling_utils.py heuristically grep's source files
+    for this exact string to whitelist classes that support the dispatch).
+    Even if we never actually use the grouped_mm kernel (we run "eager" by
+    default since variable per-layer expert counts preclude grouped MM), the
+    decorator must be present to unblock model instantiation.
+    """
 
     def __init__(self, config, num_experts: Optional[int] = None):
         super().__init__()
