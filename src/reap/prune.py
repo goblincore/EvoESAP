@@ -40,7 +40,7 @@ from reap.model_util import (
     patched_model_map,
     resolve_model_attrs,
 )
-from reap.eval import run_evaluate
+# run_evaluate is imported lazily inside main() — eval suite is an optional dep.
 import shutil
 
 logger = logging.getLogger(__name__)
@@ -446,6 +446,15 @@ def main():
 
     # eval
     if reap_args.do_eval:
+        # Lazy import — eval suite is optional in this fork.
+        try:
+            from reap.eval import run_evaluate
+        except ImportError as e:
+            raise RuntimeError(
+                "do_eval=True but the eval-suite extras (lm_eval, evalplus, "
+                "livecodebench, etc.) are not installed. Either pip install "
+                "them, or rerun with do_eval=False / run_final_eval=false."
+            ) from e
         remove_hook_from_module(model, recurse=True)
         model.to("cpu")
         del model
